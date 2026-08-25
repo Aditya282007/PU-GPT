@@ -27,32 +27,62 @@ async function createUsers() {
     await mongoose.connect(MONGO_URI);
     console.log('Connected to MongoDB');
 
-    const users = [
-      {
-        name: 'Admin User',
-        email: 'admin@pu.edu',
-        password: 'admin123',
+    // Read users from environment variables
+    // Format: ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME, ADMIN_DEPARTMENT
+    //         TEACHER_EMAIL, TEACHER_PASSWORD, TEACHER_NAME, TEACHER_DEPARTMENT, TEACHER_SUBJECTS (comma-separated)
+    //         STUDENT_EMAIL, STUDENT_PASSWORD, STUDENT_NAME, STUDENT_DEPARTMENT, STUDENT_SUBJECTS (comma-separated)
+
+    const users = [];
+
+    // Admin
+    if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+      users.push({
+        name: process.env.ADMIN_NAME || 'Admin User',
+        email: process.env.ADMIN_EMAIL,
+        password: process.env.ADMIN_PASSWORD,
         role: 'admin',
-        department: 'Administration',
+        department: process.env.ADMIN_DEPARTMENT || 'Administration',
         subjects: [],
-      },
-      {
-        name: 'Dr. Jane Smith',
-        email: 'teacher@pu.edu',
-        password: 'teacher123',
+      });
+    }
+
+    // Teacher
+    if (process.env.TEACHER_EMAIL && process.env.TEACHER_PASSWORD) {
+      users.push({
+        name: process.env.TEACHER_NAME || 'Teacher User',
+        email: process.env.TEACHER_EMAIL,
+        password: process.env.TEACHER_PASSWORD,
         role: 'teacher',
-        department: 'Computer Science Engineering',
-        subjects: ['Data Structures', 'Algorithms', 'Database Systems'],
-      },
-      {
-        name: 'Student User',
-        email: 'student@pu.edu',
-        password: 'student123',
+        department: process.env.TEACHER_DEPARTMENT || 'Computer Science Engineering',
+        subjects: (process.env.TEACHER_SUBJECTS || 'Data Structures,Algorithms,Database Systems')
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean),
+      });
+    }
+
+    // Student
+    if (process.env.STUDENT_EMAIL && process.env.STUDENT_PASSWORD) {
+      users.push({
+        name: process.env.STUDENT_NAME || 'Student User',
+        email: process.env.STUDENT_EMAIL,
+        password: process.env.STUDENT_PASSWORD,
         role: 'student',
-        department: 'Computer Science Engineering',
-        subjects: ['Data Structures', 'Algorithms'],
-      },
-    ];
+        department: process.env.STUDENT_DEPARTMENT || 'Computer Science Engineering',
+        subjects: (process.env.STUDENT_SUBJECTS || 'Data Structures,Algorithms')
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean),
+      });
+    }
+
+    if (users.length === 0) {
+      console.log('No users configured. Set environment variables:');
+      console.log('  ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME, ADMIN_DEPARTMENT');
+      console.log('  TEACHER_EMAIL, TEACHER_PASSWORD, TEACHER_NAME, TEACHER_DEPARTMENT, TEACHER_SUBJECTS');
+      console.log('  STUDENT_EMAIL, STUDENT_PASSWORD, STUDENT_NAME, STUDENT_DEPARTMENT, STUDENT_SUBJECTS');
+      process.exit(0);
+    }
 
     for (const u of users) {
       const existing = await User.findOne({ email: u.email });
@@ -70,14 +100,8 @@ async function createUsers() {
         department: u.department,
         subjects: u.subjects,
       });
-      console.log(`Created ${u.role}: ${u.email} / ${u.password}`);
+      console.log(`Created ${u.role}: ${u.email}`);
     }
-
-    console.log('\n--- Login Credentials ---');
-    console.log('Admin:    admin@pu.edu    / admin123');
-    console.log('Teacher:  teacher@pu.edu  / teacher123');
-    console.log('Student:  student@pu.edu  / student123');
-    console.log('\nLogin at: http://localhost:5173/login');
 
   } catch (err) {
     console.error('Error:', err.message);
