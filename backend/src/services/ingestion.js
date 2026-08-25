@@ -18,7 +18,7 @@ async function getCollection() {
 }
 
 function chunkText(text, options = {}) {
-  const { chunkSize = 800, overlap = 100 } = options;
+  const { chunkSize = 1500, overlap = 200 } = options; // ~300-500 tokens
   const chunks = [];
   let start = 0;
   
@@ -126,6 +126,7 @@ export async function processDocumentWithText(documentId, text) {
     const collection = await getCollection();
 
     const ids = chunks.map((_, i) => `${documentId}-${i}`);
+    const filename = document.title || `teacher-response-${documentId}`;
     const metadatas = chunks.map((chunk, i) => ({
       documentId: documentId.toString(),
       department: document.department,
@@ -133,6 +134,8 @@ export async function processDocumentWithText(documentId, text) {
       semester: document.semester,
       unit: document.unit || '',
       chunkIndex: i,
+      sourceDoc: filename,
+      page: i + 1,
       text: chunk.slice(0, 500),
     }));
 
@@ -199,6 +202,7 @@ export async function processDocument(documentId) {
     const collection = await getCollection();
 
     const ids = chunks.map((_, i) => `${documentId}-${i}`);
+    const filename = document.title || document.fileUrl || `doc-${documentId}`;
     const metadatas = chunks.map((chunk, i) => ({
       documentId: documentId.toString(),
       department: document.department,
@@ -206,6 +210,8 @@ export async function processDocument(documentId) {
       semester: document.semester,
       unit: document.unit || '',
       chunkIndex: i,
+      sourceDoc: filename,
+      page: i + 1,
       text: chunk.slice(0, 500),
     }));
 

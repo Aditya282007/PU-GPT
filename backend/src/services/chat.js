@@ -2,28 +2,24 @@ import ollama from 'ollama';
 import { searchChunks } from './ingestion.js';
 import { Conversation, FlaggedQuestion } from '../models/index.js';
 
-const QWEN_MODEL = 'phi4:14b';
-const PHI4_MODEL = 'phi4:14b';
+const LLM_MODEL = 'qwen2.5:3b-instruct-q4_K_M';
 
-const QWEN_SYSTEM_PROMPT = `You are a curriculum assistant for Parul University. Answer questions using ONLY the provided course material excerpts. 
+const SYSTEM_PROMPT = `You are the course assistant for {department} at Parul University, helping students
+with {subject} ({semester}). Answer strictly from the retrieved course material below —
+do not use outside knowledge, even if you know the answer.
 
-Rules:
-1. Cite sources inline using [doc:X] format where X is the citation index
-2. If the context doesn't contain enough information, say so clearly
-3. Never hallucinate or use external knowledge
-4. Be concise but complete
-5. Use the same language as the student's question`;
+RETRIEVED CONTEXT:
+{retrieved_chunks}
 
-const PHI4_SYSTEM_PROMPT = `You are a reasoning specialist for math, science, and code questions. 
+STUDENT QUESTION:
+{student_question}
 
-Given a student question and relevant course material excerpts:
-1. Analyze the problem step by step
-2. Show your reasoning clearly
-3. Derive the answer strictly from the provided material
-4. If the material is insufficient, state what's missing
-5. Output your reasoning AND the final answer clearly separated
-
-You do NOT face students directly. Your output feeds into the answer generator.`;
+RULES:
+1. Answer only using the retrieved context. If it doesn't contain enough information,
+   say so plainly rather than guessing.
+2. Cite every factual claim: [Source: {filename}, p.{page}].
+3. Explain the concept, not just the answer — students should understand why.
+4. Format with Markdown; use LaTeX (\\( \\) inline, \\[ \\] block) for any math notation.`;
 
 const MATH_SCIENCE_KEYWORDS = [
   'calculate', 'solve', 'equation', 'formula', 'derivative', 'integral',
@@ -34,56 +30,36 @@ const MATH_SCIENCE_KEYWORDS = [
 ];
 
 function needsPhi4Routing(question, subject) {
-  const lowerQuestion = question.toLowerCase();
-  const lowerSubject = subject.toLowerCase();
-  
-  const mathScienceSubjects = ['mathematics', 'math', 'physics', 'chemistry', 'biology', 'computer science', 'programming', 'data science'];
-  const isMathScienceSubject = mathScienceSubjects.some(s => lowerSubject.includes(s));
-  
-  const hasKeywords = MATH_SCIENCE_KEYWORDS.some(k => lowerQuestion.includes(k));
-  
-  return isMathScienceSubject || hasKeywords;
+  return false; // Single model only
 }
 
-async function callPhi4(question, context) {
-  const prompt = `Question: ${question}
+async function callLLM(question, context, department, subject, semester) {
+  // Build context with source info for citations
+  const contextChunks = context.map((c, i) => {
+    const filename = c.metadata?.sourceDoc || c.metadata?.documentId || 'unknown';
+    const page = c.metadata?.page || c.metadata?.chunkIndex || 'N/A';
+    return `[Source: ${filename}, p.${page}]\n${c.text}`;
+  }).join('\n\n');
 
-Context excerpts:
-${context.map((c, i) => `[${i}] ${c.text}`).join('\n\n')}
-
-Reason step by step and provide the final answer.`;
-
-  const response = await ollama.chat({
-    model: PHI4_MODEL,
-    messages: [
-      { role: 'system', content: PHI4_SYSTEM_PROMPT },
-      { role: 'user', content: prompt },
-    ],
-    options: { temperature: 0.1 },
-  });
-
-  return response.message.content;
-}
-
-async function callQwen(question, context, phi4Reasoning = null) {
-  let prompt = `Question: ${question}
-
-Context excerpts:
-${context.map((c, i) => `[${i}] ${c.text}`).join('\n\n')}`;
-
-  if (phi4Reasoning) {
-    prompt += `\n\nReasoning from specialist:\n${phi4Reasoning}`;
-  }
-
-  prompt += '\n\nAnswer with inline citations [doc:X]:';
+  const systemPrompt = SYSTEM_PROMPT
+    .replace('{department}', department)
+    .replace('{subject}', subject)
+    .replace('{semester}', semester)
+    .replace('{retrieved_chunks}', contextChunks)
+    .replace('{student_question}', question);
 
   const response = await ollama.chat({
-    model: QWEN_MODEL,
+    model: LLM_MODEL,
     messages: [
-      { role: 'system', content: QWEN_SYSTEM_PROMPT },
-      { role: 'user', content: prompt },
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: question },
     ],
-    options: { temperature: 0.2 },
+    options: { 
+      temperature: 0.2,
+      num_predict: 500,
+      num_ctx: 4096,
+      keep_alive: -1,
+    },
     stream: true,
   });
 
@@ -91,19 +67,26 @@ ${context.map((c, i) => `[${i}] ${c.text}`).join('\n\n')}`;
 }
 
 function extractCitations(answer, context) {
-  const citationRegex = /\[doc:(\d+)\]/g;
+  const citationRegex = /\[Source: ([^\],]+), p\.([^\]]+)\]/g;
   const citations = [];
   let match;
   
   while ((match = citationRegex.exec(answer)) !== null) {
-    const index = parseInt(match[1]);
-    if (context[index]) {
+    const filename = match[1];
+    const page = match[2];
+    // Find matching context
+    const matchingContext = context.find(c => {
+      const metaFilename = c.metadata?.sourceDoc || c.metadata?.documentId || '';
+      const metaPage = c.metadata?.page || c.metadata?.chunkIndex;
+      return metaFilename === filename && String(metaPage) === String(page);
+    });
+    if (matchingContext) {
       citations.push({
-        chunkId: `${context[index].metadata.documentId}-${context[index].metadata.chunkIndex}`,
-        documentId: context[index].metadata.documentId,
-        excerpt: context[index].text.slice(0, 300),
-        page: context[index].metadata.chunkIndex,
-        score: context[index].score,
+        chunkId: `${matchingContext.metadata.documentId}-${matchingContext.metadata.chunkIndex}`,
+        documentId: matchingContext.metadata.documentId,
+        excerpt: matchingContext.text.slice(0, 300),
+        page: matchingContext.metadata.page || matchingContext.metadata.chunkIndex,
+        score: matchingContext.score,
       });
     }
   }
@@ -113,7 +96,7 @@ function extractCitations(answer, context) {
 
 export async function processChatQuestion(studentId, question, subject, conversationId = null) {
   const filters = { subject };
-  const context = await searchChunks(question, filters, 8);
+  const context = await searchChunks(question, filters, 3); // top-k = 3
 
   // Filter out low relevance results (distance > 1.5 = score < -0.5)
   const relevantContext = context.filter(c => c.score > -0.5);
@@ -134,20 +117,12 @@ export async function processChatQuestion(studentId, question, subject, conversa
     };
   }
 
-  const usePhi4 = needsPhi4Routing(question, subject);
-  let phi4Reasoning = null;
-
-  if (usePhi4) {
-    phi4Reasoning = await callPhi4(question, relevantContext);
-  }
-
-  const stream = await callQwen(question, relevantContext, phi4Reasoning);
+  const stream = await callLLM(question, relevantContext, 'Computer Science Engineering', subject, '1');
   
   return {
     escalated: false,
     stream,
     context: relevantContext,
-    usePhi4,
   };
 }
 
