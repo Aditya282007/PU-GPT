@@ -1,0 +1,159 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-primary: #1E2B24;
+    --text-primary: #EDEDE3;
+    --accent-citation: #E8B84B;
+    --rule-line: #3A4A40;
+    --accent-secondary: #7FA88F;
+    --accent-danger: #C1694F;
+  }
+
+  .light {
+    --bg-primary: #F3F1E9;
+    --text-primary: #20241F;
+    --accent-citation: #E8B84B;
+    --rule-line: #C8C0B0;
+    --accent-secondary: #7FA88F;
+    --accent-danger: #C1694F;
+  }
+
+  * {
+    @apply border-rule-line;
+  }
+
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply bg-chalkboard text-chalk font-body antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  .light body {
+    @apply bg-paper-bg text-ink-dark;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display font-medium tracking-tight;
+  }
+
+  ::selection {
+    @apply bg-amber-chalk/30 text-inherit;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-amber-chalk ring-offset-2 ring-offset-chalkboard;
+  }
+
+  .light :focus-visible {
+    @apply ring-offset-paper-bg;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-body font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-chalk focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-amber-chalk text-chalkboard hover:bg-amber-chalk/90 active:bg-amber-chalk/100;
+  }
+
+  .btn-secondary {
+    @apply btn bg-rule-line text-chalk hover:bg-rule-line/80 active:bg-rule-line;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-chalk hover:bg-rule-line active:bg-rule-line/50;
+  }
+
+  .btn-danger {
+    @apply btn bg-rust text-chalk hover:bg-rust/90 active:bg-rust;
+  }
+
+  .input {
+    @apply w-full px-4 py-3 rounded-lg bg-rule-line/30 border border-rule-line text-chalk placeholder:text-chalk/40 transition-all duration-200 focus:outline-none focus:border-amber-chalk focus:ring-2 focus:ring-amber-chalk/20;
+  }
+
+  .light .input {
+    @apply bg-white border-rule-line text-ink-dark placeholder:text-ink-dark/40 focus:border-amber-chalk focus:ring-amber-chalk/20;
+  }
+
+  .card {
+    @apply bg-rule-line/20 border border-rule-line rounded-xl p-6;
+  }
+
+  .light .card {
+    @apply bg-white border-rule-line shadow-sm;
+  }
+
+  .citation-badge {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-chalk/15 border border-amber-chalk/30 text-amber-chalk font-mono text-xs cursor-pointer transition-all duration-200 hover:bg-amber-chalk/25 hover:border-amber-chalk/50;
+  }
+
+  .citation-badge:hover {
+    @apply scale-[1.02];
+  }
+
+  .margin-note {
+    @apply absolute right-0 w-48 pr-4 text-xs font-mono text-amber-chalk opacity-0 transition-all duration-300 pointer-events-none;
+  }
+
+  .margin-note.visible {
+    @apply opacity-100 pointer-events-auto;
+  }
+
+  .margin-note-content {
+    @apply bg-amber-chalk/10 border-l-2 border-amber-chalk pl-3 py-2 rounded-r-lg;
+  }
+
+  .leader-line {
+    @apply absolute w-0.5 bg-amber-chalk/40 hidden;
+  }
+
+  .notebook-line {
+    @apply relative before:absolute before:inset-0 before:bg-[repeating-linear-gradient(0deg,transparent,transparent_1.5rem,var(--rule-line)_1.5rem,var(--rule-line)_calc(1.5rem_+_1px))] before:pointer-events-none;
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--rule-line) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--rule-line);
+    border-radius: 3px;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .animate-in {
+    animation: fadeIn 0.3s ease-out, slideUp 0.3s ease-out;
+  }
+}

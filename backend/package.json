@@ -1,0 +1,30 @@
+{
+  "name": "pu-gpt-backend",
+  "version": "1.0.0",
+  "description": "Parul University Curriculum Assistant Backend",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node --max-old-space-size=8192 --expose-gc --watch src/index.js",
+    "start": "node --max-old-space-size=8192 --expose-gc src/index.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mongoose": "^8.4.1",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "pdf-parse": "^1.1.1",
+    "mammoth": "^1.8.0",
+    "chromadb": "^1.8.2",
+    "ollama": "^0.5.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "zod": "^3.23.8",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
