@@ -37,10 +37,14 @@ export function LibraryPage() {
   const [deletingId, setDeletingId] = useState(null);
   const [uploadSubject, setUploadSubject] = useState('');
 
-  useEffect(() => {
+useEffect(() => {
     fetchDocuments();
     fetchSubjects();
-  }, [filters, pagination.page]);
+    // Initialize uploadSubject from teacher's assigned subjects
+    if (user.subjects?.length > 0 && !uploadSubject) {
+      setUploadSubject(user.subjects[0]);
+    }
+  }, [filters, pagination.page, user.subjects]);
 
   const fetchDocuments = async () => {
     setLoading(true);
@@ -56,15 +60,8 @@ export function LibraryPage() {
   };
 
 const fetchSubjects = async () => {
-    try {
-      const res = await documentApi.subjects();
-      setSubjects(res.data.subjects);
-      if (res.data.subjects.length > 0 && !uploadSubject) {
-        setUploadSubject(res.data.subjects[0]);
-      }
-    } catch {
-      console.error('Failed to fetch subjects');
-    }
+    // Use teacher's assigned subjects instead of fetching from API
+    setSubjects(user.subjects || []);
   };
 
   const handleUpload = async (formData, onProgress) => {

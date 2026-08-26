@@ -73,6 +73,11 @@ router.post('/upload', authenticate, authorize('teacher', 'admin'), upload.singl
 
     const { department, subject, semester, unit } = parsed.data;
 
+    // Check if teacher has access to this subject
+    if (req.user.role === 'teacher' && !req.user.subjects.includes(subject)) {
+      throw new AppError('You do not have permission to upload to this subject', 403);
+    }
+
     const document = await Document.create({
       title: req.file.originalname,
       uploadedBy: req.user._id,

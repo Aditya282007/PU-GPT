@@ -18,7 +18,8 @@ RULES:
 1. Answer only using the retrieved context. If it doesn't contain enough information,
    say so plainly rather than guessing.
 2. Cite every factual claim: [Source: {filename}, p.{page}].
-3. Explain the concept, not just the answer — students should understand why.
+3. **Provide detailed, thorough explanations** — include all relevant details from the context. Don't be brief; students need complete understanding.
+4. When comparing concepts (e.g., StringBuffer vs StringBuilder), include the full comparison.
 4. Format with Markdown; use LaTeX (\\( \\) inline, \\[ \\] block) for any math notation.`;
 
 const MATH_SCIENCE_KEYWORDS = [
@@ -56,7 +57,7 @@ async function callLLM(question, context, department, subject, semester) {
     ],
     options: { 
       temperature: 0.2,
-      num_predict: 500,
+      num_predict: 1000,
       num_ctx: 4096,
       keep_alive: -1,
     },
@@ -96,7 +97,7 @@ function extractCitations(answer, context) {
 
 export async function processChatQuestion(studentId, question, subject, conversationId = null) {
   const filters = { subject };
-  const context = await searchChunks(question, filters, 3); // top-k = 3
+  const context = await searchChunks(question, filters, 6); // top-k = 6 for more comprehensive context
 
   // Filter out low relevance results (distance > 1.5 = score < -0.5)
   const relevantContext = context.filter(c => c.score > -0.5);
