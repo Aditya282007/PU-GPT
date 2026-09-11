@@ -36,6 +36,7 @@ const upload = multer({
 });
 
 const uploadSchema = z.object({
+  college: z.string().min(1),
   department: z.string().min(1),
   subject: z.string().min(1),
   semester: z.string().min(1),
@@ -71,7 +72,7 @@ router.post('/upload', authenticate, authorize('teacher', 'admin'), upload.singl
       });
     }
 
-    const { department, subject, semester, unit } = parsed.data;
+    const { college, department, subject, semester, unit } = parsed.data;
 
     // Check if teacher has access to this subject
     if (req.user.role === 'teacher' && !req.user.subjects.includes(subject)) {
@@ -81,6 +82,7 @@ router.post('/upload', authenticate, authorize('teacher', 'admin'), upload.singl
     const document = await Document.create({
       title: req.file.originalname,
       uploadedBy: req.user._id,
+      college,
       department,
       subject,
       semester,

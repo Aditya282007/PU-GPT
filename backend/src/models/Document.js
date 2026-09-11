@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const documentSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
   uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  college: { type: String, required: true, trim: true },
   department: { type: String, required: true, trim: true },
   subject: { type: String, required: true, trim: true },
   semester: { type: String, required: true, trim: true },

@@ -1,10 +1,64 @@
 import { Document } from '../models/index.js';
 import { config } from '../config/index.js';
 import { ChromaClient } from 'chromadb';
-import ollama from 'ollama';
+import { Ollama } from 'ollama';
 import fs from 'fs/promises';
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
+
+const ollama = new Ollama({ host: 'http://localhost:11434' });
+
+const SUBJECT_CHUNK_CONFIG = {
+  'Engineering': { chunkSize: 800, overlap: 100 },
+  'Life Sciences': { chunkSize: 1500, overlap: 200 },
+  'Business': { chunkSize: 1500, overlap: 200 },
+  'Law': { chunkSize: 1800, overlap: 200 },
+  'Creative': { chunkSize: 1800, overlap: 200 },
+  'default': { chunkSize: 1500, overlap: 200 },
+};
+
+function getChunkConfig(subject) {
+  if (SUBJECT_CHUNK_CONFIG[subject]) {
+    return SUBJECT_CHUNK_CONFIG[subject];
+  }
+  
+  for (const [category, config] of Object.entries(SUBJECT_CHUNK_CONFIG)) {
+    if (subject.toLowerCase().includes(category.toLowerCase())) {
+      return config;
+    }
+  }
+  
+  return SUBJECT_CHUNK_CONFIG.default;
+}
+
+function getSubjectCategory(subject) {
+  const subjectToCategory = {
+    'Computer Engineering': 'Engineering',
+    'Computer Science': 'Engineering',
+    'Information Technology': 'Engineering',
+    'Electronics': 'Engineering',
+    'Electrical': 'Engineering',
+    'Mechanical': 'Engineering',
+    'Civil': 'Engineering',
+    'Chemical': 'Engineering',
+    'Biotechnology': 'Life Sciences',
+    'Pharmacy': 'Life Sciences',
+    'Microbiology': 'Life Sciences',
+    'Pharmacology': 'Life Sciences',
+    'Business Administration': 'Business',
+    'Commerce': 'Business',
+    'Management': 'Business',
+    'Law': 'Law',
+    'Legal Studies': 'Law',
+    'Fine Arts': 'Creative',
+    'Design': 'Creative',
+    'Architecture': 'Creative',
+    'Literature': 'Creative',
+    'Humanities': 'Creative',
+  };
+  
+  return subjectToCategory[subject] || 'Engineering';
+}
 
 export const chroma = new ChromaClient({ path: config.chromaUrl });
 const COLLECTION_NAME = 'pu-gpt-documents';
@@ -18,27 +72,25 @@ async function getCollection() {
 }
 
 function chunkText(text, options = {}) {
-  const { chunkSize = 1500, overlap = 200 } = options; // ~300-500 tokens
+  const subject = options?.subject;
+  const config = getChunkConfig(subject);
+  const { chunkSize = config.chunkSize, overlap = config.overlap } = options;
   const chunks = [];
   let start = 0;
   
-  // Safety check for empty or very large text
   if (!text || text.length === 0) {
     return chunks;
   }
   
-  // Cap text length to prevent memory issues
-  const maxTextLength = 50000; // 50KB max
+  const maxTextLength = 50000;
   if (text.length > maxTextLength) {
     text = text.slice(0, maxTextLength);
   }
   
-  // Maximum chunks to prevent runaway loops
   const maxChunks = 1000;
-  
   let prevStart = -1;
+  
   while (start < text.length && chunks.length < maxChunks) {
-    // Safety: prevent infinite loop if start doesn't advance
     if (start <= prevStart) {
       console.error('ChunkText: start not advancing, breaking');
       break;
@@ -56,7 +108,6 @@ function chunkText(text, options = {}) {
       }
     }
 
-    // Ensure end > start
     if (end <= start) {
       end = Math.min(start + chunkSize, text.length);
     }
@@ -69,10 +120,9 @@ function chunkText(text, options = {}) {
       chunks.push(chunk);
     }
 
-    // Ensure start advances
     const nextStart = end - overlap;
     if (nextStart <= start) {
-      start = start + chunkSize; // Force advance by at least chunkSize
+      start = start + chunkSize;
     } else {
       start = nextStart;
     }
@@ -84,7 +134,6 @@ function chunkText(text, options = {}) {
 }
 
 async function extractText(filePath, fileType) {
-  // Handle teacher-generated content
   if (filePath === 'teacher-response') {
     throw new Error('Teacher response should use processDocumentWithText');
   }
@@ -108,6 +157,18 @@ async function extractText(filePath, fileType) {
   throw new Error(`Unsupported file type: ${fileType}`);
 }
 
+async function generateEmbeddings(texts) {
+  const embeddings = [];
+  for (const text of texts) {
+    const response = await ollama.embeddings({
+      model: 'bge-m3',
+      prompt: text,
+    });
+    embeddings.push(response.embedding);
+  }
+  return embeddings;
+}
+
 export async function processDocumentWithText(documentId, text) {
   let document = await Document.findById(documentId);
   if (!document) {
@@ -115,7 +176,7 @@ export async function processDocumentWithText(documentId, text) {
   }
 
   try {
-    const chunks = chunkText(text);
+    const chunks = chunkText(text, { subject: document.subject });
 
     if (chunks.length === 0) {
       throw new Error('No valid chunks extracted from document');
@@ -129,6 +190,7 @@ export async function processDocumentWithText(documentId, text) {
     const filename = document.title || `teacher-response-${documentId}`;
     const metadatas = chunks.map((chunk, i) => ({
       documentId: documentId.toString(),
+      college: document.college,
       department: document.department,
       subject: document.subject,
       semester: document.semester,
@@ -160,27 +222,17 @@ export async function processDocumentWithText(documentId, text) {
   }
 }
 
-function normalizeVector(vec) {
-  const norm = Math.sqrt(vec.reduce((sum, v) => sum + v * v, 0));
-  return norm > 0 ? vec.map(v => v / norm) : vec;
-}
-
-async function generateEmbeddings(texts) {
-  const embeddings = [];
-  const batchSize = 5; // Process in small batches to avoid OOM
-  for (let i = 0; i < texts.length; i += batchSize) {
-    const batch = texts.slice(i, i + batchSize);
-    for (const text of batch) {
-      const response = await ollama.embeddings({
-        model: 'bge-m3:latest',
-        prompt: text,
-      });
-      embeddings.push(normalizeVector(response.embedding));
-    }
-    // Allow GC between batches
-    if (global.gc) global.gc();
+export async function deleteDocumentChunks(documentId) {
+  const collection = await getCollection();
+  try {
+    await collection.delete({
+      where: { documentId: documentId.toString() },
+    });
+    console.log(`Deleted chunks for document ${documentId}`);
+  } catch (error) {
+    console.error(`Error deleting chunks for document ${documentId}:`, error);
+    throw error;
   }
-  return embeddings;
 }
 
 export async function processDocument(documentId) {
@@ -191,7 +243,7 @@ export async function processDocument(documentId) {
 
   try {
     const text = await extractText(document.fileUrl, document.fileType);
-    const chunks = chunkText(text);
+    const chunks = chunkText(text, { subject: document.subject });
 
     if (chunks.length === 0) {
       throw new Error('No valid chunks extracted from document');
@@ -202,16 +254,14 @@ export async function processDocument(documentId) {
     const collection = await getCollection();
 
     const ids = chunks.map((_, i) => `${documentId}-${i}`);
-    const filename = document.title || document.fileUrl || `doc-${documentId}`;
     const metadatas = chunks.map((chunk, i) => ({
       documentId: documentId.toString(),
+      college: document.college,
       department: document.department,
       subject: document.subject,
       semester: document.semester,
       unit: document.unit || '',
       chunkIndex: i,
-      sourceDoc: filename,
-      page: i + 1,
       text: chunk.slice(0, 500),
     }));
 
@@ -236,44 +286,43 @@ export async function processDocument(documentId) {
   }
 }
 
-export async function searchChunks(query, filters = {}, topK = 5) {
+export async function searchChunks(query, filters = {}, topK = 6) {
   const collection = await getCollection();
-  const queryEmbedding = (await ollama.embeddings({
-    model: 'bge-m3:latest',
-    prompt: query,
-  })).embedding;
   
-  // Normalize query embedding to match stored vectors
-  const norm = Math.sqrt(queryEmbedding.reduce((sum, v) => sum + v * v, 0));
-  const normalizedQuery = norm > 0 ? queryEmbedding.map(v => v / norm) : queryEmbedding;
+  const whereConditions = [];
+  if (filters.college) whereConditions.push({ college: { $eq: filters.college } });
+  if (filters.department) whereConditions.push({ department: { $eq: filters.department } });
+  if (filters.subject) whereConditions.push({ subject: { $eq: filters.subject } });
+  if (filters.semester) whereConditions.push({ semester: { $eq: filters.semester } });
 
-  const where = {};
-  if (filters.department) where.department = filters.department;
-  if (filters.subject) where.subject = filters.subject;
-  if (filters.semester) where.semester = filters.semester;
+  const where = whereConditions.length === 1 ? whereConditions[0] : 
+                whereConditions.length > 1 ? { $and: whereConditions } : {};
 
+  const queryEmbedding = await generateEmbeddings([query]);
+  
   const results = await collection.query({
-    queryEmbeddings: [normalizedQuery],
+    queryEmbeddings: queryEmbedding,
     nResults: topK,
-    where: Object.keys(where).length > 0 ? where : undefined,
-    include: ['documents', 'metadatas', 'distances'],
+    where: whereConditions.length > 0 ? where : undefined,
   });
 
-  return results.documents[0].map((doc, i) => ({
-    text: doc,
-    metadata: results.metadatas[0][i],
-    distance: results.distances[0][i],
-    score: 1 - results.distances[0][i],
-  }));
-}
-
-export async function deleteDocumentChunks(documentId) {
-  const collection = await getCollection();
-  try {
-    await collection.delete({
-      where: { documentId: documentId.toString() },
-    });
-  } catch (error) {
-    console.warn('Failed to delete document chunks:', error.message);
+  if (!results.documents || !results.documents[0] || results.documents[0].length === 0) {
+    return [];
   }
+
+  const documents = results.documents[0];
+  const metadatas = results.metadatas[0];
+  const distances = results.distances[0];
+
+  return documents.map((text, i) => {
+    const distance = distances[i];
+    // Convert Euclidean distance to similarity score (0-1 range)
+    // For normalized embeddings, max distance is ~2, but actual distances can be larger
+    const score = Math.max(0, 1 - distance / 1000);
+    return {
+      text,
+      metadata: metadatas[i],
+      score,
+    };
+  });
 }

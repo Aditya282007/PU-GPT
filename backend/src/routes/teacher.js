@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import express from 'express';
-import { FlaggedQuestion, Document, Conversation } from '../models/index.js';
+import { Document, Conversation } from '../models/index.js';
 import { authenticate, authorize, validate, validateQuery, AppError } from '../middleware/index.js';
 import { processDocument, processDocumentWithText } from '../services/ingestion.js';
 

@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import express from 'express';
-import { Conversation, FlaggedQuestion } from '../models/index.js';
+import { Conversation, User } from '../models/index.js';
 import { authenticate, authorize, validate, validateQuery, AppError } from '../middleware/index.js';
-import { processChatQuestion, saveConversation, getConversationHistory } from '../services/chat.js';
+import { processChatQuestion, saveConversation, getConversationHistory, webSearch, confirmWebSearch, callWebSearchLLM } from '../services/chat.js';
 
 const router = express.Router();
 
@@ -22,6 +22,14 @@ router.post('/ask', authenticate, authorize('student'), validate(askSchema), asy
     }
 
     const result = await processChatQuestion(studentId, question, subject, conversationId);
+
+    if (result.needsPermission) {
+      return res.json({
+        needsPermission: true,
+        permissionPrompt: result.permissionPrompt,
+        message: result.message,
+      });
+    }
 
     if (result.escalated) {
       return res.json({
@@ -47,11 +55,12 @@ router.post('/ask', authenticate, authorize('student'), validate(askSchema), asy
     res.end();
 
     const userMessage = { role: 'user', content: question, citations: [], timestamp: new Date() };
-    const assistantMessage = { 
-      role: 'assistant', 
-      content: fullAnswer, 
-      citations: extractCitations(fullAnswer, context),
-      timestamp: new Date() 
+    const assistantMessage = {
+      role: 'assistant',
+      content: fullAnswer,
+      citations: result.webSearch ? [] : extractCitations(fullAnswer, context),
+      webSources: result.webSearch ? [] : undefined,
+      timestamp: new Date()
     };
 
     const messages = [
@@ -79,23 +88,29 @@ async function getConversationMessages(conversationId) {
 }
 
 function extractCitations(answer, context) {
-  const citationRegex = /\[doc:(\d+)\]/g;
+  const citationRegex = /\[Source: ([^\],]+), p\.([^\]]+)\]/g;
   const citations = [];
   let match;
-  
+
   while ((match = citationRegex.exec(answer)) !== null) {
-    const index = parseInt(match[1]);
-    if (context[index]) {
+    const filename = match[1];
+    const page = match[2];
+    const matchingContext = context.find(c => {
+      const metaFilename = c.metadata?.sourceDoc || c.metadata?.documentId || '';
+      const metaPage = c.metadata?.page || c.metadata?.chunkIndex;
+      return metaFilename === filename && String(metaPage) === String(page);
+    });
+    if (matchingContext) {
       citations.push({
-        chunkId: `${context[index].metadata.documentId}-${context[index].metadata.chunkIndex}`,
-        documentId: context[index].metadata.documentId,
-        excerpt: context[index].text.slice(0, 300),
-        page: context[index].metadata.chunkIndex,
-        score: context[index].score,
+        chunkId: `${matchingContext.metadata.documentId}-${matchingContext.metadata.chunkIndex}`,
+        documentId: matchingContext.metadata.documentId,
+        excerpt: matchingContext.text.slice(0, 300),
+        page: matchingContext.metadata.page || matchingContext.metadata.chunkIndex,
+        score: matchingContext.score,
       });
     }
   }
-  
+
   return citations;
 }
 
@@ -107,7 +122,7 @@ router.get('/history', authenticate, authorize('student'), validateQuery(z.objec
   try {
     const { subject, page, limit } = req.query;
     const conversations = await getConversationHistory(req.user._id, subject);
-    
+
     const start = (page - 1) * limit;
     const paginated = conversations.slice(start, start + limit);
 
@@ -156,12 +171,95 @@ router.delete('/history/:id', authenticate, authorize('student'), async (req, re
   }
 });
 
-router.get('/flagged', authenticate, authorize('student'), async (req, res, next) => {
+router.post('/web-search', authenticate, authorize('student'), validate(z.object({
+  question: z.string().min(1).max(2000),
+  subject: z.string().min(1),
+})), async (req, res, next) => {
   try {
-    const flagged = await FlaggedQuestion.find({ studentId: req.user._id })
-      .sort({ createdAt: -1 })
-      .lean();
-    res.json({ flaggedQuestions: flagged });
+    const { question, subject } = req.body;
+    const studentId = req.user._id;
+
+    const student = await User.findById(studentId).lean();
+    const studentProfile = {
+      college: student?.college || 'Parul University',
+      program: student?.program || 'btech',
+      field: student?.field || 'Computer Engineering',
+      fieldCategory: student?.fieldCategory || 'Engineering',
+      subject: subject,
+      semester: student?.semester || '1',
+    };
+
+    const searchResults = await webSearch(question, studentProfile);
+
+    if (searchResults.length === 0) {
+      return res.json({
+        answer: "I couldn't find relevant information on the web for your question.",
+        sources: [],
+      });
+    }
+
+    const stream = await callWebSearchLLM(question, searchResults, studentProfile);
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    for await (const chunk of stream) {
+      const content = chunk.message.content;
+      res.write(content);
+    }
+
+    res.end();
+
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/confirm-web-search', authenticate, authorize('student'), validate(z.object({
+  question: z.string().min(1).max(2000),
+  subject: z.string().min(1),
+  conversationId: z.string().optional(),
+})), async (req, res, next) => {
+  try {
+    const { question, subject, conversationId } = req.body;
+    const studentId = req.user._id;
+
+    if (!req.user.subjects.includes(subject)) {
+      throw new AppError('You are not enrolled in this subject', 403);
+    }
+
+    const student = await User.findById(studentId).lean();
+    const studentProfile = {
+      college: student?.college || 'Parul University',
+      program: student?.program || 'btech',
+      field: student?.field || 'Computer Engineering',
+      fieldCategory: student?.fieldCategory || 'Engineering',
+      subject: subject,
+      semester: student?.semester || '1',
+    };
+
+    const searchResults = await webSearch(question, studentProfile);
+
+    if (searchResults.length === 0) {
+      return res.json({
+        answer: "I couldn't find relevant information on the web for your question.",
+        sources: [],
+      });
+    }
+
+    const stream = await callWebSearchLLM(question, searchResults, studentProfile);
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    for await (const chunk of stream) {
+      const content = chunk.message.content;
+      res.write(content);
+    }
+
+    res.end();
   } catch (error) {
     next(error);
   }

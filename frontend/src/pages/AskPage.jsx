@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Send, Loader2, Flag, AlertCircle, Copy, Check, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { Send, Loader2, Flag, AlertCircle, Copy, Check, FileText, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { Card, CardContent } from '@/components/ui/Card';
 import { api } from '@/utils/api';
+import { MessageRenderer } from '@/components/ui/MessageRenderer';
 
 const EXAMPLE_PROMPTS = {
   'Computer Science': [
@@ -95,6 +96,12 @@ export function AskPage() {
     e.preventDefault();
     if (!question.trim() || !subject) return;
 
+    // Check for web search command (\ prefix)
+    const isWebSearch = question.startsWith('\\');
+    const query = isWebSearch ? question.slice(1).trim() : question;
+    
+    if (!query.trim() || !subject) return;
+
     setLoading(true);
     setError('');
     setStreaming(true);
@@ -103,21 +110,21 @@ export function AskPage() {
     const userMessage = { role: 'user', content: question, citations: [], timestamp: new Date().toISOString() };
     setMessages(prev => [...prev, userMessage]);
 
-const query = question;
     setQuestion('');
 
     try {
       const token = localStorage.getItem('token');
+      const endpoint = isWebSearch ? '/api/chat/web-search' : '/api/chat/ask';
       const body = { question: query, subject };
       if (conversationId) body.conversationId = conversationId;
       
-      const res = await fetch('/api/chat/ask', {
+      const res = await fetch(`/api/chat/${isWebSearch ? 'web-search' : 'ask'}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ question: query, subject, conversationId }),
       });
 
       // Use tee to clone the stream so we can check first chunk
@@ -131,7 +138,7 @@ const query = question;
       const { done: firstDone, value: firstValue } = await reader1.read();
       const firstChunk = decoder.decode(firstValue, { stream: true });
       
-      // Check if first chunk looks like JSON (escalated response)
+      // Check if first chunk looks like JSON (escalated response or web search response)
       let isJsonResponse = false;
       try {
         const parsed = JSON.parse(firstChunk.trim());
@@ -140,6 +147,23 @@ const query = question;
           setError(parsed.message || 'Question escalated to teacher');
           setStreaming(false);
           setLoading(false);
+          return;
+        }
+        if (parsed.sources) {
+          // Web search JSON response
+          isJsonResponse = true;
+          // Handle web search JSON response
+          setStreaming(false);
+          setLoading(false);
+          const assistantMessage = { 
+            role: 'assistant', 
+            content: parsed.answer, 
+            citations: [],
+            webSources: parsed.sources || [],
+            isWebSearch: true,
+            timestamp: new Date().toISOString() 
+          };
+          setMessages(prev => [...prev, assistantMessage]);
           return;
         }
       } catch {
@@ -197,6 +221,8 @@ const query = question;
         role: 'assistant', 
         content: fullAnswer, 
         citations,
+        webSources: [],
+        isWebSearch: false,
         timestamp: new Date().toISOString() 
       };
       setMessages(prev => [...prev, assistantMessage]);
@@ -229,6 +255,7 @@ const query = question;
   };
 
   const emptyState = messages.length === 0 && !streaming && !currentAnswer;
+  const isWebSearchMode = question.startsWith('\\');
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -265,54 +292,18 @@ const query = question;
                 <div className="flex items-center gap-2 mb-1">
                   <span className="font-medium text-sm">{msg.role === 'user' ? 'You' : 'Assistant'}</span>
                   <span className="text-xs text-chalk/40">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                  {msg.isWebSearch && (
+                    <span className="px-1.5 py-0.5 text-xs font-medium bg-sage/20 text-sage rounded-full">
+                      Web Search
+                    </span>
+                  )}
                 </div>
-                <div 
-                  className={`prose prose-invert max-w-none ${msg.role === 'assistant' ? 'font-display' : 'font-body'}`}
-                  dangerouslySetInnerHTML={{ __html: formatMessage(msg.content) }}
+                <MessageRenderer 
+                  content={msg.content} 
+                  citations={msg.citations || []} 
+                  webSources={msg.webSources || []}
+                  isWebSearch={msg.isWebSearch}
                 />
-                {msg.citations?.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {msg.citations.map((cite, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setShowCitations(prev => ({ ...prev, [i]: !prev[i] }))}
-                        className="citation-badge"
-                        aria-expanded={showCitations[i]}
-                        aria-controls={`citation-${index}-${i}`}
-                      >
-                        [{i + 1}] {cite.excerpt?.slice(0, 50)}...
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {msg.citations?.length > 0 && (
-                  <div className="mt-2 space-y-2" role="region" aria-label="Citation details">
-                    {msg.citations.map((cite, i) => (
-                      showCitations[i] && (
-                        <div key={i} id={`citation-${index}-${i}`} className="margin-note-content animate-in">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1">
-                              <p className="font-mono text-xs text-chalk/60 mb-1">
-                                Source: Document {cite.documentId?.slice(-8)} • Chunk {cite.chunkId?.split('-').pop()}
-                              </p>
-                              <p className="text-sm text-chalk/80">{cite.excerpt}</p>
-                              {cite.score && (
-                                <p className="text-xs text-chalk/50 mt-1">Relevance: {(cite.score * 100).toFixed(0)}%</p>
-                              )}
-                            </div>
-                            <button
-                              onClick={() => navigator.clipboard.writeText(cite.excerpt)}
-                              className="p-1 text-chalk/40 hover:text-amber-chalk transition-colors"
-                              aria-label="Copy citation"
-                            >
-                              <Copy className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -378,12 +369,17 @@ const query = question;
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={emptyState ? 'Ask a question about your course material...' : 'Ask a follow-up...'}
+            placeholder={emptyState ? 'Ask a question about your course material...' : 'Ask a follow-up... (Type \\ for web search)'}
             className="w-full min-h-[100px] max-h-[300px] px-4 py-3 rounded-xl bg-rule-line/30 border border-rule-line text-chalk placeholder:text-chalk/40 resize-none focus:outline-none focus:border-amber-chalk focus:ring-2 focus:ring-amber-chalk/20 font-body"
             rows={3}
             disabled={loading || streaming}
             aria-label="Your question"
           />
+          {question.startsWith('\\') && (
+            <span className="absolute top-3 right-10 px-2 py-1 text-xs font-medium bg-sage/20 text-sage rounded-full">
+              Web Search Mode
+            </span>
+          )}
           <div className="absolute bottom-3 right-3 flex items-center gap-2">
             <Button
               type="submit"
@@ -398,12 +394,9 @@ const query = question;
         </div>
 
         <p className="text-xs text-chalk/40 text-center">
-          Press Enter to send, Shift+Enter for new line
+          Press Enter to send, Shift+Enter for new line. Type <kbd className="px-1.5 py-0.5 bg-rule-line/50 rounded text-xs font-mono">\\</kbd> for web search.
         </p>
       </form>
     </div>
   );
 }
-
-
-

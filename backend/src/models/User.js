@@ -8,6 +8,12 @@ const userSchema = new mongoose.Schema({
   role: { type: String, enum: ['student', 'teacher', 'admin'], required: true },
   department: { type: String, trim: true },
   subjects: [{ type: String, trim: true }],
+  // Student personalization fields
+  college: { type: String, trim: true },
+  program: { type: String, enum: ['diploma', 'btech', 'mtech'], trim: true },
+  fieldCategory: { type: String, trim: true },
+  field: { type: String, trim: true },
+  semester: { type: String, trim: true },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });

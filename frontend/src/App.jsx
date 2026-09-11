@@ -4,7 +4,6 @@ import { Layout } from '@/components/layout/Layout';
 import { LoginPage } from '@/pages/LoginPage';
 import { AskPage } from '@/pages/AskPage';
 import { HistoryPage } from '@/pages/HistoryPage';
-import { FlaggedPage } from '@/pages/FlaggedPage';
 import { LibraryPage } from '@/pages/LibraryPage';
 import { InsightsPage } from '@/pages/InsightsPage';
 import { AdminDashboardPage } from '@/pages/AdminDashboardPage';
@@ -50,7 +49,6 @@ export default function App() {
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/ask" element={<ProtectedRoute allowedRoles={['student']}><AskPage /></ProtectedRoute>} />
         <Route path="/history" element={<ProtectedRoute allowedRoles={['student']}><HistoryPage /></ProtectedRoute>} />
-        <Route path="/flagged" element={<ProtectedRoute allowedRoles={['student', 'teacher', 'admin']}><FlaggedPage /></ProtectedRoute>} />
         
         <Route path="/library" element={<ProtectedRoute allowedRoles={['teacher', 'admin']}><LibraryPage /></ProtectedRoute>} />
         <Route path="/insights" element={<ProtectedRoute allowedRoles={['teacher', 'admin']}><InsightsPage /></ProtectedRoute>} />
