@@ -31,27 +31,28 @@ router.post('/ask', authenticate, authorize('student'), validate(askSchema), asy
       });
     }
 
-    if (result.escalated) {
-      return res.json({
-        escalated: true,
-        flaggedId: result.flaggedId,
-        message: result.message,
-      });
-    }
-
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Content-Type-Options', 'nosniff');
 
     let fullAnswer = '';
     const context = result.context;
+    let firstContent = true;
 
     for await (const chunk of result.stream) {
-      const content = chunk.message.content;
-      fullAnswer += content;
-      res.write(content);
+      if (chunk.status) {
+        // Emit status event
+        res.write(`data: ${JSON.stringify({ status: chunk.status, stage: chunk.stage })}\n\n`);
+      } else if (chunk.message?.content) {
+        // Emit content event
+        const content = chunk.message.content;
+        fullAnswer += content;
+        res.write(`data: ${JSON.stringify({ content })}\n\n`);
+      }
     }
 
+    res.write('data: [DONE]\n\n');
     res.end();
 
     const userMessage = { role: 'user', content: question, citations: [], timestamp: new Date() };
@@ -200,15 +201,20 @@ router.post('/web-search', authenticate, authorize('student'), validate(z.object
 
     const stream = await callWebSearchLLM(question, searchResults, studentProfile);
 
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    // Emit web search status
+    res.write(`data: ${JSON.stringify({ status: 'Searching the web...', stage: 'webSearch' })}\n\n`);
 
     for await (const chunk of stream) {
       const content = chunk.message.content;
-      res.write(content);
+      res.write(`data: ${JSON.stringify({ content })}\n\n`);
     }
 
+    res.write('data: [DONE]\n\n');
     res.end();
 
   } catch (error) {
@@ -250,15 +256,20 @@ router.post('/confirm-web-search', authenticate, authorize('student'), validate(
 
     const stream = await callWebSearchLLM(question, searchResults, studentProfile);
 
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    // Emit web search status
+    res.write(`data: ${JSON.stringify({ status: 'Searching the web...', stage: 'webSearch' })}\n\n`);
 
     for await (const chunk of stream) {
       const content = chunk.message.content;
-      res.write(content);
+      res.write(`data: ${JSON.stringify({ content })}\n\n`);
     }
 
+    res.write('data: [DONE]\n\n');
     res.end();
   } catch (error) {
     next(error);

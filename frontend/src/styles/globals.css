@@ -108,20 +108,41 @@
     @apply scale-[1.02];
   }
 
-  .margin-note {
-    @apply absolute right-0 w-48 pr-4 text-xs font-mono text-amber-chalk opacity-0 transition-all duration-300 pointer-events-none;
+  .citation-marker {
+    @apply inline-block px-1.5 py-0.5 text-xs font-mono text-amber-chalk bg-amber-chalk/10 border border-amber-chalk/30 rounded cursor-help transition-all duration-200 hover:bg-amber-chalk/20 hover:border-amber-chalk/50;
   }
 
-  .margin-note.visible {
+  .citation-marker:hover {
+    @apply scale-[1.05];
+  }
+
+  .code-panel {
+    @apply bg-chalkboard/95 border border-amber-chalk/20 rounded-lg shadow-xl;
+  }
+
+  .light .code-panel {
+    @apply bg-paper-bg/95 border border-amber-chalk/20 shadow-xl;
+  }
+
+  .margin-note {
+    @apply absolute right-full mr-4 w-64 pr-4 opacity-0 transition-all duration-300 pointer-events-none;
+  }
+
+  .group:hover .margin-note,
+  .citation-marker:hover + .margin-note {
     @apply opacity-100 pointer-events-auto;
   }
 
   .margin-note-content {
-    @apply bg-amber-chalk/10 border-l-2 border-amber-chalk pl-3 py-2 rounded-r-lg;
+    @apply bg-chalkboard border border-amber-chalk/30 rounded-lg p-3 shadow-xl;
+  }
+
+  .light .margin-note-content {
+    @apply bg-paper-bg border border-amber-chalk/30 rounded-lg p-3 shadow-xl;
   }
 
   .leader-line {
-    @apply absolute w-0.5 bg-amber-chalk/40 hidden;
+    @apply absolute right-full top-1/2 -translate-y-1/2 w-4 h-0.5 bg-amber-chalk/40;
   }
 
   .notebook-line {

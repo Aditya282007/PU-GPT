@@ -111,6 +111,7 @@ return (
           <FileUpload 
             onUpload={handleUpload} 
             additionalFields={{ 
+              college: user.college || 'Parul University',
               department: user.department || '', 
               subject: uploadSubject,
               semester: filters.semester || '1',
@@ -250,6 +251,3 @@ return (
     </div>
   );
 }
-
-
-

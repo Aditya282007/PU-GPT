@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import { Send, Loader2, Flag, AlertCircle, Copy, Check, FileText, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
-import { Card, CardContent } from '@/components/ui/Card';
 import { api } from '@/utils/api';
 import { MessageRenderer } from '@/components/ui/MessageRenderer';
 
@@ -50,6 +49,9 @@ export function AskPage() {
   const [conversationId, setConversationId] = useState(null);
   const [error, setError] = useState('');
   const [subjects, setSubjects] = useState([]);
+  const [permissionPrompt, setPermissionPrompt] = useState(null);
+  const [status, setStatus] = useState(null);
+  const [pendingQuery, setPendingQuery] = useState(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -94,18 +96,25 @@ export function AskPage() {
 
   const handleAsk = async (e) => {
     e.preventDefault();
-    if (!question.trim() || !subject) return;
+    const trimmedQuestion = question.trim();
+    if (!trimmedQuestion || !subject) return;
 
-    // Check for web search command (\ prefix)
-    const isWebSearch = question.startsWith('\\');
-    const query = isWebSearch ? question.slice(1).trim() : question;
+    // Check for web search command (\ prefix) - support both regular (U+005C) and full-width (U+FF3C) backslash
+    // Use explicit character codes to avoid escape issues
+    const BACKSLASH = '\u005C';
+    const FULLWIDTH_BACKSLASH = '\uFF3C';
+    const isWebSearch = trimmedQuestion.startsWith(BACKSLASH) || trimmedQuestion.startsWith(FULLWIDTH_BACKSLASH);
+    const query = isWebSearch ? trimmedQuestion.slice(1).trim() : trimmedQuestion;
     
-    if (!query.trim() || !subject) return;
+    if (!query || !subject) return;
+
+    console.log('[Chat] isWebSearch:', isWebSearch, 'query:', query, 'endpoint:', isWebSearch ? '/web-search' : '/ask');
 
     setLoading(true);
     setError('');
     setStreaming(true);
     setCurrentAnswer('');
+    setPermissionPrompt(null); // Clear any previous permission prompt
 
     const userMessage = { role: 'user', content: question, citations: [], timestamp: new Date().toISOString() };
     setMessages(prev => [...prev, userMessage]);
@@ -114,6 +123,16 @@ export function AskPage() {
 
     try {
       const token = localStorage.getItem('token');
+      console.log('[Chat] Token:', token ? 'present' : 'MISSING');
+      console.log('[Chat] Subject:', subject, 'Query:', query);
+      
+      if (!token) {
+        setError('Please log in to ask questions');
+        setStreaming(false);
+        setLoading(false);
+        return;
+      }
+      
       const endpoint = isWebSearch ? '/api/chat/web-search' : '/api/chat/ask';
       const body = { question: query, subject };
       if (conversationId) body.conversationId = conversationId;
@@ -122,10 +141,19 @@ export function AskPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ question: query, subject, conversationId }),
+        body: JSON.stringify(body),
       });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('[Chat] Server error:', res.status, errorText);
+        setError(`Server error: ${res.status} - ${errorText}`);
+        setStreaming(false);
+        setLoading(false);
+        return;
+      }
 
       // Use tee to clone the stream so we can check first chunk
       const [stream1, stream2] = res.body.tee();
@@ -138,13 +166,22 @@ export function AskPage() {
       const { done: firstDone, value: firstValue } = await reader1.read();
       const firstChunk = decoder.decode(firstValue, { stream: true });
       
-      // Check if first chunk looks like JSON (escalated response or web search response)
+      // Check if first chunk looks like JSON (escalated response, permission prompt, or web search response)
       let isJsonResponse = false;
       try {
         const parsed = JSON.parse(firstChunk.trim());
         if (parsed.escalated) {
           isJsonResponse = true;
           setError(parsed.message || 'Question escalated to teacher');
+          setStreaming(false);
+          setLoading(false);
+          return;
+        }
+        if (parsed.needsPermission) {
+          // Permission prompt for web search
+          isJsonResponse = true;
+          setPermissionPrompt(parsed.permissionPrompt);
+          setPendingQuery(query);
           setStreaming(false);
           setLoading(false);
           return;
@@ -172,7 +209,7 @@ export function AskPage() {
 
       // Now use stream2 for the actual reading
       const reader = stream2.getReader();
-      buffer = firstChunk; // Include first chunk in buffer
+      buffer = ''; // Don't include firstChunk - reader2 yields it too
 
       while (true) {
         const { done, value } = await reader.read();
@@ -217,15 +254,19 @@ export function AskPage() {
         setCurrentAnswer(fullAnswer);
       }
 
-      const assistantMessage = { 
-        role: 'assistant', 
-        content: fullAnswer, 
-        citations,
-        webSources: [],
-        isWebSearch: false,
-        timestamp: new Date().toISOString() 
-      };
-      setMessages(prev => [...prev, assistantMessage]);
+      // Only add assistant message for streaming responses with actual content
+      // (JSON responses like needsPermission/sources already returned early)
+      if (fullAnswer.trim()) {
+        const assistantMessage = { 
+          role: 'assistant', 
+          content: fullAnswer, 
+          citations,
+          webSources: [],
+          isWebSearch: false,
+          timestamp: new Date().toISOString() 
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+      }
       setStreaming(false);
 
     } catch (err) {
@@ -240,8 +281,159 @@ export function AskPage() {
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleAsk(e);
+      e.stopPropagation();
+      const form = e.target.closest('form');
+      if (form) {
+        form.requestSubmit();
+      }
     }
+  };
+
+  const handlePermissionResponse = async (confirmed) => {
+    if (!permissionPrompt) return;
+    
+    const userMessage = { role: 'user', content: confirmed ? 'Yes, search the web' : 'No, I\'ll rephrase my question', citations: [], timestamp: new Date().toISOString() };
+    setMessages(prev => [...prev, userMessage]);
+    
+    if (!confirmed) {
+      setPermissionPrompt(null);
+      setPendingQuery(null);
+      return;
+    }
+
+    // User confirmed - call confirm-web-search
+    setLoading(true);
+    setStreaming(true);
+    setCurrentAnswer('');
+    setPermissionPrompt(null);
+    setStatus('retrieval');
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/chat/confirm-web-search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ question: pendingQuery, subject, conversationId }),
+      });
+
+      // Use tee to clone the stream so we can check first chunk
+      const [stream1, stream2] = res.body.tee();
+      const reader1 = stream1.getReader();
+      const decoder = new TextDecoder();
+      let fullAnswer = '';
+      let buffer = '';
+
+      // Read first chunk to determine if JSON or stream
+      const { done: firstDone, value: firstValue } = await reader1.read();
+      const firstChunk = decoder.decode(firstValue, { stream: true });
+      
+      // Check if first chunk looks like JSON
+      let isJsonResponse = false;
+      try {
+        const parsed = JSON.parse(firstChunk.trim());
+        if (parsed.sources) {
+          // Web search JSON response
+          isJsonResponse = true;
+          setStreaming(false);
+          setLoading(false);
+          const assistantMessage = { 
+            role: 'assistant', 
+            content: parsed.answer, 
+            citations: [],
+            webSources: parsed.sources || [],
+            isWebSearch: true,
+            timestamp: new Date().toISOString() 
+          };
+          setMessages(prev => [...prev, assistantMessage]);
+          return;
+        }
+      } catch {
+        // Not JSON, treat as stream
+      }
+
+      // Now use stream2 for the actual reading
+      const reader = stream2.getReader();
+      buffer = ''; // Don't include firstChunk - reader2 yields it too
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(data);
+              
+              // Skip control messages
+              if (parsed.needsPermission || parsed.sources || parsed.escalated) {
+                continue;
+              }
+              
+              if (parsed.content) {
+                fullAnswer += parsed.content;
+                setCurrentAnswer(fullAnswer);
+              }
+              if (parsed.citations) {
+                setCitations(parsed.citations);
+              }
+              if (parsed.conversationId) {
+                setConversationId(parsed.conversationId);
+              }
+            } catch {
+              fullAnswer += data;
+              setCurrentAnswer(fullAnswer);
+            }
+          }
+        }
+      }
+
+      if (buffer) {
+        fullAnswer += buffer;
+        setCurrentAnswer(fullAnswer);
+      }
+
+      // Only add assistant message for streaming responses with actual content
+      if (fullAnswer.trim()) {
+        const assistantMessage = { 
+          role: 'assistant', 
+          content: fullAnswer, 
+          citations,
+          webSources: [],
+          isWebSearch: false,
+          timestamp: new Date().toISOString() 
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+      }
+      setStreaming(false);
+
+    } catch (err) {
+      console.error('Web search confirmation error:', err);
+      setError('Failed to search the web. Please try again.');
+      setStreaming(false);
+    } finally {
+      setLoading(false);
+      setPendingQuery(null);
+    }
+  };
+
+  const getStatusText = () => {
+    if (!status) return null;
+    const statusTexts = {
+      retrieval: 'Reading your course material...',
+      generation: 'Thinking...',
+      webSearch: 'Searching the web...',
+      webGeneration: 'Reviewing sources...',
+    };
+    return statusTexts[status] || 'Processing...';
   };
 
   const formatMessage = (content) => {
@@ -276,40 +468,78 @@ export function AskPage() {
       </div>
 
       <div className="space-y-4">
-        {messages.map((msg, index) => (
-          <div key={index} className="animate-in">
-            <div className="flex gap-4">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                msg.role === 'user' ? 'bg-amber-chalk/20' : 'bg-sage/20'
-              }`}>
-                {msg.role === 'user' ? (
-                  <span className="text-amber-chalk text-sm font-medium">{user?.name?.charAt(0).toUpperCase()}</span>
-                ) : (
-                  <FileText className="w-4 h-4 text-sage" />
-                )}
+{messages.map((msg, index) => (
+            <div key={index} className="animate-in">
+              <div className="flex gap-4">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                  msg.role === 'user' ? 'bg-amber-chalk/20' : 'bg-sage/20'
+                }`}>
+                  {msg.role === 'user' ? (
+                    <span className="text-amber-chalk text-sm font-medium">{user?.name?.charAt(0).toUpperCase()}</span>
+                  ) : (
+                    <FileText className="w-4 h-4 text-sage" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-medium text-sm">{msg.role === 'user' ? 'You' : 'Assistant'}</span>
+                    <span className="text-xs text-chalk/40">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                    {msg.isWebSearch && (
+                      <span className="px-1.5 py-0.5 text-xs font-medium bg-sage/20 text-sage rounded-full">
+                        Web Search
+                      </span>
+                    )}
+                  </div>
+                  <MessageRenderer 
+                    content={msg.content} 
+                    citations={msg.citations || []} 
+                    webSources={msg.webSources || []}
+                    isWebSearch={msg.isWebSearch}
+                  />
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-medium text-sm">{msg.role === 'user' ? 'You' : 'Assistant'}</span>
-                  <span className="text-xs text-chalk/40">{new Date(msg.timestamp).toLocaleTimeString()}</span>
-                  {msg.isWebSearch && (
+            </div>
+          ))}
+
+          {permissionPrompt && (
+            <div key="permission-prompt" className="animate-in">
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-sage/20 flex items-center justify-center flex-shrink-0">
+                  <FileText className="w-4 h-4 text-sage" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-medium text-sm">Assistant</span>
+                    <span className="text-xs text-chalk/40">{new Date().toLocaleTimeString()}</span>
                     <span className="px-1.5 py-0.5 text-xs font-medium bg-sage/20 text-sage rounded-full">
                       Web Search
                     </span>
-                  )}
+                  </div>
+                  <div className="bg-sage/10 border border-sage/20 rounded-lg p-4">
+                    <p className="text-chalk/90 mb-4">{permissionPrompt.message}</p>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="primary" 
+                        size="sm" 
+                        onClick={() => handlePermissionResponse(true)}
+                      >
+                        Yes, search the web
+                      </Button>
+                      <Button 
+                        variant="secondary" 
+                        size="sm" 
+                        onClick={() => handlePermissionResponse(false)}
+                      >
+                        No, I'll rephrase
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-                <MessageRenderer 
-                  content={msg.content} 
-                  citations={msg.citations || []} 
-                  webSources={msg.webSources || []}
-                  isWebSearch={msg.isWebSearch}
-                />
               </div>
             </div>
-          </div>
-        ))}
+          )}
 
-        {streaming && (
+          {streaming && (
           <div className="animate-in">
             <div className="flex gap-4">
               <div className="w-8 h-8 rounded-full bg-sage/20 flex items-center justify-center flex-shrink-0">
@@ -318,11 +548,17 @@ export function AskPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="font-medium text-sm">Assistant</span>
-                  <Loader2 className="w-4 h-4 animate-spin text-amber-chalk" />
+                  {status && (
+                    <span className="text-xs text-sage flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      {getStatusText()}
+                    </span>
+                  )}
+                  {!status && <Loader2 className="w-4 h-4 animate-spin text-amber-chalk" />}
                 </div>
                 <div className="font-display prose prose-invert max-w-none whitespace-pre-wrap">
-                  {currentAnswer}
-                  <span className="inline-block w-1 h-6 bg-amber-chalk animate-pulse ml-1" />
+                  {currentAnswer || (status ? getStatusText() : '')}
+                  {currentAnswer && <span className="inline-block w-1 h-6 bg-amber-chalk animate-pulse ml-1" />}
                 </div>
               </div>
             </div>
@@ -336,11 +572,6 @@ export function AskPage() {
         <div className="mb-4 flex items-center gap-2 p-3 bg-rust/10 border border-rust/30 rounded-lg text-rust text-sm" role="alert">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           {error}
-          {error.includes('instructor') && (
-            <Button variant="ghost" size="sm" onClick={() => navigate('/flagged')}>
-              View my questions
-            </Button>
-          )}
         </div>
       )}
 

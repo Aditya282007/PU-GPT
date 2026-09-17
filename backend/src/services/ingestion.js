@@ -133,6 +133,16 @@ function chunkText(text, options = {}) {
   return chunks;
 }
 
+// Timeout wrapper to prevent indefinite hanging
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => 
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    )
+  ]);
+}
+
 async function extractText(filePath, fileType) {
   if (filePath === 'teacher-response') {
     throw new Error('Teacher response should use processDocumentWithText');
@@ -141,12 +151,13 @@ async function extractText(filePath, fileType) {
   const buffer = await fs.readFile(filePath);
 
   if (fileType === 'application/pdf') {
-    const data = await pdfParse(buffer);
+    // Add timeout for PDF parsing (60 seconds)
+    const data = await withTimeout(pdfParse(buffer), 60000, 'PDF parsing');
     return data.text;
   }
 
   if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-    const result = await mammoth.extractRawText({ buffer });
+    const result = await withTimeout(mammoth.extractRawText({ buffer }), 60000, 'DOCX parsing');
     return result.value;
   }
 
@@ -157,13 +168,33 @@ async function extractText(filePath, fileType) {
   throw new Error(`Unsupported file type: ${fileType}`);
 }
 
+// Retry wrapper for transient failures
+async function withRetry(promiseFn, retries = 3, delayMs = 1000, label = 'Operation') {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await promiseFn();
+    } catch (error) {
+      if (attempt === retries) throw error;
+      console.warn(`${label} attempt ${attempt} failed: ${error.message}. Retrying in ${delayMs}ms...`);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+}
+
 async function generateEmbeddings(texts) {
   const embeddings = [];
   for (const text of texts) {
-    const response = await ollama.embeddings({
-      model: 'bge-m3',
-      prompt: text,
-    });
+    // Add timeout for each embedding (30 seconds) with retry
+    const response = await withRetry(
+      () => withTimeout(
+        ollama.embeddings({ model: 'bge-m3', prompt: text }),
+        30000,
+        'Embedding generation'
+      ),
+      3,
+      1000,
+      'Embedding generation'
+    );
     embeddings.push(response.embedding);
   }
   return embeddings;

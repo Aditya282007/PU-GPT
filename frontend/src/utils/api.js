@@ -30,9 +30,7 @@ export const authApi = {
 };
 
 export const documentApi = {
-  upload: (formData) => api.post('/documents/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  }),
+  upload: (formData) => api.post('/documents/upload', formData),
   list: (params) => api.get('/documents', { params }),
   subjects: () => api.get('/documents/subjects'),
   delete: (id) => api.delete(`/documents/${id}`),
@@ -45,11 +43,9 @@ export const chatApi = {
   history: (params) => api.get('/chat/history', { params }),
   getConversation: (id) => api.get(`/chat/history/${id}`),
   deleteConversation: (id) => api.delete(`/chat/history/${id}`),
-  flagged: () => api.get('/chat/flagged'),
 };
 
 export const teacherApi = {
-  flagged: (params) => api.get('/teacher', { params }),
   respond: (id, response, convertToContent) => api.post(`/teacher/${id}/respond`, { response, convertToContent }),
   insights: (params) => api.get('/teacher/insights', { params }),
 };

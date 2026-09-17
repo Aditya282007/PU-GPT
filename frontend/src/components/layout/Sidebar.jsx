@@ -2,7 +2,6 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { 
   BookOpen, 
   History, 
-  Flag, 
   Upload, 
   Inbox, 
   BarChart2, 
@@ -20,7 +19,6 @@ const navItems = {
   student: [
     { path: '/ask', label: 'Ask', icon: BookOpen },
     { path: '/history', label: 'History', icon: History },
-    { path: '/flagged', label: 'My Questions', icon: Flag },
   ],
   teacher: [
     { path: '/library', label: 'Content Library', icon: Upload },

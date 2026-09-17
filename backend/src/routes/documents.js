@@ -93,9 +93,15 @@ router.post('/upload', authenticate, authorize('teacher', 'admin'), upload.singl
       status: 'processing',
     });
 
-    processDocument(document._id).catch(err => {
-      console.error('Document processing failed:', err);
-    });
+    processDocument(document._id)
+      .then(() => console.log('Document processed:', document._id))
+      .catch(async (err) => {
+        console.error('Document processing failed:', err);
+        await Document.findByIdAndUpdate(document._id, {
+          status: 'failed',
+          errorMessage: err.message || 'Processing failed',
+        });
+      });
 
     res.status(201).json({
       document: {
