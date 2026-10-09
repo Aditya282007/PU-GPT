@@ -1,7 +1,9 @@
+
 import { z } from 'zod';
 import express from 'express';
 import { User } from '../models/index.js';
 import { authenticate, authorize, generateToken, validate } from '../middleware/index.js';
+import { authLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -19,7 +21,7 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-router.post('/register', validate(registerSchema), async (req, res, next) => {
+router.post('/register', authLimiter, validate(registerSchema), async (req, res, next) => {
   try {
     const { name, email, password, role, department, subjects } = req.body;
 
@@ -55,7 +57,7 @@ router.post('/register', validate(registerSchema), async (req, res, next) => {
   }
 });
 
-router.post('/login', validate(loginSchema), async (req, res, next) => {
+router.post('/login', authLimiter, validate(loginSchema), async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
