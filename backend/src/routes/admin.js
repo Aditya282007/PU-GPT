@@ -43,7 +43,7 @@ const createTeacherSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(100),
   department: z.string().min(1),
-  subjects: z.array(z.string()).optional(),
+  subjects: z.array(z.string()),
 });
 
 const departmentSchema = z.object({
@@ -78,6 +78,23 @@ router.post('/departments', authenticate, authorize('admin'), validate(departmen
 router.get('/subjects', authenticate, authorize('admin'), async (req, res, next) => {
   try {
     const subjects = await User.distinct('subjects', { role: { $in: ['teacher', 'student'] } });
+    res.json({ subjects: subjects.filter(s => s).sort() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/subjects/profile', authenticate, async (req, res, next) => {
+  try {
+    // Use authenticated student's profile fields for automatic matching
+    const { college, department, program, semester } = req.user;
+    const filter = {};
+    if (college) filter.college = college;
+    if (department) filter.department = department;
+    if (program) filter.program = program;
+    if (semester) filter.semester = semester;
+    
+    const subjects = await Document.distinct('subject', filter);
     res.json({ subjects: subjects.filter(s => s).sort() });
   } catch (error) {
     next(error);
@@ -120,7 +137,7 @@ router.post('/teachers', authenticate, authorize('admin'), validate(createTeache
       passwordHash: password,
       role: 'teacher',
       department,
-      subjects: subjects || [],
+      subjects,
     });
 
     res.status(201).json({
@@ -132,6 +149,16 @@ router.post('/teachers', authenticate, authorize('admin'), validate(createTeache
         subjects: teacher.subjects,
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/teachers/:id/subjects', authenticate, authorize('admin'), validate(z.object({ subjects: z.array(z.string()) })), async (req, res, next) => {
+  try {
+    const user = await User.findByIdAndUpdate(req.params.id, { subjects: req.body.subjects }, { new: true }).select('-passwordHash');
+    if (!user) throw new AppError('User not found', 404);
+    res.json({ user: { id: user._id, name: user.name, email: user.email, department: user.department, subjects: user.subjects } });
   } catch (error) {
     next(error);
   }

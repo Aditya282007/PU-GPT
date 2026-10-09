@@ -65,16 +65,11 @@ export function AskPage() {
 
   const fetchSubjects = async () => {
     try {
-      const res = await api.get('/chat/history', { params: { limit: 1 } });
-      setSubjects(user.subjects || []);
-      if (user.subjects?.length > 0 && !subject) {
-        setSubject(user.subjects[0]);
-      }
-    } catch {
-      setSubjects(user.subjects || []);
-      if (user.subjects?.length > 0 && !subject) {
-        setSubject(user.subjects[0]);
-      }
+      const res = await api.get('/subjects/profile');
+      setSubjects(res.data.subjects);
+    } catch (err) {
+      console.error('Failed to fetch subjects from API, falling back to default empty state:', err);
+      setSubjects([]);
     }
   };
 

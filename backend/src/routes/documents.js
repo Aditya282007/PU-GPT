@@ -93,15 +93,16 @@ router.post('/upload', authenticate, authorize('teacher', 'admin'), upload.singl
       status: 'processing',
     });
 
-    processDocument(document._id)
-      .then(() => console.log('Document processed:', document._id))
-      .catch(async (err) => {
-        console.error('Document processing failed:', err);
-        await Document.findByIdAndUpdate(document._id, {
-          status: 'failed',
-          errorMessage: err.message || 'Processing failed',
-        });
+    try {
+      await processDocument(document._id);
+      console.log('Document processed:', document._id);
+    } catch (err) {
+      console.error('Document processing failed:', err);
+      await Document.findByIdAndUpdate(document._id, {
+        status: 'failed',
+        errorMessage: err.message || 'Processing failed',
       });
+    }
 
     res.status(201).json({
       document: {
@@ -195,6 +196,16 @@ router.post('/upload', authenticate, authorize('teacher', 'admin'), upload.singl
     if (req.user.role === 'teacher') {
       filter.uploadedBy = req.user._id;
     }
+    
+    // Profile-based automatic filtering for students
+    // Students only see documents matching their college, department, program, and semester
+    if (req.user.role === 'student') {
+      if (req.user.college) filter.college = req.user.college;
+      if (req.user.department) filter.department = req.user.department;
+      if (req.user.program) filter.program = req.user.program;
+      if (req.user.semester) filter.semester = req.user.semester;
+    }
+    
     if (department) filter.department = department;
     if (subject) filter.subject = subject;
     if (semester) filter.semester = semester;

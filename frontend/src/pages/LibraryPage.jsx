@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { FileUpload } from '@/components/ui/FileUpload';
-import { documentApi } from '@/utils/api';
+import { documentApi, adminApi } from '@/utils/api';
 import { formatDistanceToNow } from 'date-fns';
 
 const STATUS_CONFIG = {
@@ -40,11 +40,7 @@ export function LibraryPage() {
 useEffect(() => {
     fetchDocuments();
     fetchSubjects();
-    // Initialize uploadSubject from teacher's assigned subjects
-    if (user.subjects?.length > 0 && !uploadSubject) {
-      setUploadSubject(user.subjects[0]);
-    }
-  }, [filters, pagination.page, user.subjects]);
+  }, [filters, pagination.page]);
 
   const fetchDocuments = async () => {
     setLoading(true);
@@ -60,8 +56,12 @@ useEffect(() => {
   };
 
 const fetchSubjects = async () => {
-    // Use teacher's assigned subjects instead of fetching from API
-    setSubjects(user.subjects || []);
+    try {
+      const res = await api.get('/subjects/profile');
+      setSubjects(res.data.subjects);
+    } catch (err) {
+      console.error('Failed to fetch subjects from API:', err);
+    }
   };
 
   const handleUpload = async (formData, onProgress) => {

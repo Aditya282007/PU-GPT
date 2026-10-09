@@ -7,7 +7,6 @@ const userSchema = new mongoose.Schema({
   passwordHash: { type: String, required: true },
   role: { type: String, enum: ['student', 'teacher', 'admin'], required: true },
   department: { type: String, trim: true },
-  subjects: [{ type: String, trim: true }],
   // Student personalization fields
   college: { type: String, trim: true },
   program: { type: String, enum: ['diploma', 'btech', 'mtech'], trim: true },
