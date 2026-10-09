@@ -1,8 +1,10 @@
+
 import { z } from 'zod';
 import express from 'express';
 import { Conversation, User } from '../models/index.js';
 import { authenticate, authorize, validate, validateQuery, AppError } from '../middleware/index.js';
 import { processChatQuestion, saveConversation, getConversationHistory, webSearch, confirmWebSearch, callWebSearchLLM } from '../services/chat.js';
+import { aiLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -12,7 +14,7 @@ const askSchema = z.object({
   conversationId: z.string().optional(),
 });
 
-router.post('/ask', authenticate, authorize('student'), validate(askSchema), async (req, res, next) => {
+router.post('/ask', aiLimiter, authenticate, authorize('student'), validate(askSchema), async (req, res, next) => {
   try {
     const { question, subject, conversationId } = req.body;
     const studentId = req.user._id;
@@ -172,7 +174,7 @@ router.delete('/history/:id', authenticate, authorize('student'), async (req, re
   }
 });
 
-router.post('/web-search', authenticate, authorize('student'), validate(z.object({
+router.post('/web-search', aiLimiter, authenticate, authorize('student'), validate(z.object({
   question: z.string().min(1).max(2000),
   subject: z.string().min(1),
 })), async (req, res, next) => {
@@ -222,7 +224,7 @@ router.post('/web-search', authenticate, authorize('student'), validate(z.object
   }
 });
 
-router.post('/confirm-web-search', authenticate, authorize('student'), validate(z.object({
+router.post('/confirm-web-search', aiLimiter, authenticate, authorize('student'), validate(z.object({
   question: z.string().min(1).max(2000),
   subject: z.string().min(1),
   conversationId: z.string().optional(),
